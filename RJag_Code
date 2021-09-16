@@ -1,0 +1,98 @@
+The RJags code is:
+<p></p>
+#Seroprevalence using bayesian multilevel regression post weightingting 
+library(rjags)
+library(coda)
+### Data
+# female = 1, male = 2;
+# age categories: 1 = 0-4, 2 = 5-9, 3 = 10-14, 4 = 15-19, 5 = 20-24; 6 = 25-29;
+#                 7 = 30-34; 8=35-39; 9=40-44; 10=45-49; 11=50-54; 12=55-59; 
+#                 13=60-64; 14=65-69; 15=70-74; 16=75-79; 17=80+
+# regions: 1 = Region_A, 2 = Region_B, 3 = Region_C, 4 = Region_D,
+# 5 = Region_E, 6 = Region_F, 7 = Region_G
+
+seroprev <- read.csv("seroprevalence_strutum_data.csv")
+head(seroprev, 5)
+nr <- 7
+na <- 17
+ns <- 2
+y <- array(seroprev$spikepos, dim = c(na, nr, ns))
+n <- array(seroprev$n, dim = c(na, nr, ns))
+pw <- array(seroprev$pw, dim = c(na, nr, ns))
+### Model
+model_string_test <- "model{
+# Likelihood
+for(i in 1:na){
+for(j in 1:nr){
+for(k in 1:ns){
+y[i, j, k] ~ dbinom(se * p[i, j, k] +
+(1 - sp) * (1 - p[i, j, k]) ,
+n[i, j, k])
+logit(p[i, j, k]) <- (b0 + b1 * (k - 1)
++ u[i] - mean(u[]) + v[j] - mean(v[]))
+}
+}
+}
+# Sensitivity and specificity
+x ~ dbinom(se, 310)
+z ~ dbinom(sp, 124)
+# Age effect
+tau_a <- 1/pow(sd_a, 2)
+for(i in 1:na){
+u[i] ~ dnorm(mu_a, tau_a)
+}
+# Region effect
+tau_r <- 1/pow(sd_r, 2)
+for(j in 1:nr){
+v[j] ~ dnorm(mu_r, tau_r)
+}
+# Priors
+b0 ~ dnorm(0, 1e-04)
+b1 ~ dnorm(0, 1e-04)
+se ~ dbeta(1, 1)
+sp ~ dbeta(1, 1)
+# Hyperpriors
+sd_a ~ dnorm(0, 4) T(0,)
+sd_r ~ dnorm(0, 4) T(0,)
+mu_a ~ dnorm(0, 1e-04)
+mu_r ~ dnorm(0, 1e-04)
+# Predicted prevalence by age, region and sex
+for(i in 1:na){
+agecat[i] <- inprod(p[i,1:nr,1:ns], pw[i,1:nr,1:ns])/sum(pw[i,1:nr,1:ns])
+}
+for(j in 1:nr){
+region[j] <- inprod(p[1:na,j,1:ns], pw[1:na,j,1:ns])/sum(pw[1:na,j,1:ns])
+}
+for(k in 1:ns){
+sex[k] <- inprod(p[1:na,1:nr,k], pw[1:na,1:nr,k])/sum(pw[1:na,1:nr,k])
+}
+JHB <- inprod(p[1:na,1:nr,1:ns], pw[1:na,1:nr,1:ns])
+}"
+### Compile and update
+model_test <- jags.model(textConnection(model_string_test),
+                    data = list(y = y,
+                                n = n,
+                                x = 288,
+                                z = 122,
+                                pw = pw,
+                                na = na,
+                                nr = nr,
+                                ns = ns),
+                    n.chains = 1,
+                    inits = list(.RNG.name = "base::Wichmann-Hill",
+                                 .RNG.seed = 999))
+update(model_test, 1000, progress.bar = "none") # Burn-in period = 1000 samples
+samp_test <- coda.samples(model_test,
+                     variable.names = c("agecat", "region", "sex", "JHB",
+                                        "se", "sp"),
+                     n.iter = 10000,
+                     progress.bar = "none")
+
+summary(samp_test)
+
+plot(samp_test)
+
+
+
+
+
